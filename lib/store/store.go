@@ -5,7 +5,11 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 )
+
+// SaltSize matches FIDO2 hmac-secret salt length (lib/hmacsecret.SaltSize).
+const SaltSize = 32
 
 // Sentinel errors.
 var (
@@ -40,8 +44,7 @@ type Store interface {
 	Close() error
 }
 
-// ValidateAlias checks alias is non-empty after trim is caller's job;
-// empty string is invalid.
+// ValidateAlias checks alias is non-empty.
 func ValidateAlias(alias string) error {
 	if alias == "" {
 		return ErrInvalidAlias
@@ -49,13 +52,19 @@ func ValidateAlias(alias string) error {
 	return nil
 }
 
-// ValidateRecord checks required fields for Put.
+// ValidateRecord checks required fields for Put/Get decoding.
 func ValidateRecord(rec Record) error {
 	if err := ValidateAlias(rec.Alias); err != nil {
 		return err
 	}
-	if len(rec.CredentialID) == 0 || len(rec.Salt) == 0 || rec.RPID == "" {
-		return ErrInvalidRecord
+	if len(rec.CredentialID) == 0 {
+		return fmt.Errorf("%w: empty credential id", ErrInvalidRecord)
+	}
+	if len(rec.Salt) != SaltSize {
+		return fmt.Errorf("%w: salt must be %d bytes", ErrInvalidRecord, SaltSize)
+	}
+	if rec.RPID == "" {
+		return fmt.Errorf("%w: empty rp id", ErrInvalidRecord)
 	}
 	return nil
 }

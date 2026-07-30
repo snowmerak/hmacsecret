@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/snowmerak/hmacsecret/lib/hmacsecret"
@@ -30,21 +32,19 @@ func run(args []string) error {
 	fs.SetOutput(os.Stderr)
 
 	var (
-		backend     string
-		dbPath      string
-		rpID        string
-		userName    string
-		deviceIndex int
-		pin         string
-		noWebAuthn  bool
+		backend    string
+		dbPath     string
+		rpID       string
+		userName   string
+		device     string // empty=interactive/first, index N, or path
+		noWebAuthn bool
 	)
 
 	fs.StringVar(&backend, "backend", "pebble", "store backend: pebble|sqlite")
 	fs.StringVar(&dbPath, "db", "", "store path (default: ./data/secrets.pebble or ./data/secrets.sqlite)")
 	fs.StringVar(&rpID, "rp-id", "hmac-secret.example", "relying party id for create")
 	fs.StringVar(&userName, "user", "hmac-secret", "credential user name for create")
-	fs.IntVar(&deviceIndex, "device", 0, "authenticator index")
-	fs.StringVar(&pin, "pin", "", "authenticator PIN (empty for Windows WebAuthn UI)")
+	fs.StringVar(&device, "device", "", "device selector: empty=prompt/first, integer index, or device path")
 	fs.BoolVar(&noWebAuthn, "no-windows-webauthn", false, "exclude Windows WebAuthn broker")
 
 	if err := fs.Parse(args); err != nil {
@@ -68,9 +68,6 @@ func run(args []string) error {
 			dbPath = filepath.Join("data", "secrets.pebble")
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil && filepath.Dir(dbPath) != "." {
-		// mkdir data/ is fine; ignore when dir is .
-	}
 	if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
 		_ = os.MkdirAll(dir, 0o755)
 	}
@@ -81,15 +78,15 @@ func run(args []string) error {
 	}
 	defer st.Close()
 
-	var pinValue = pin
 	svc, err := secrets.New(secrets.Options{
 		Store: st,
-		Open: secrets.DefaultOpen(deviceIndex, hmacsecret.ListOptions{
+		Select: cliDeviceSelector(device),
+		PIN:    secrets.TerminalPIN(),
+		ListOptions: hmacsecret.ListOptions{
 			ExcludeWindowsWebAuthn: noWebAuthn,
-		}),
+		},
 		RPID:     rpID,
 		UserName: userName,
-		PIN:      pinValue,
 	})
 	if err != nil {
 		return err
@@ -157,4 +154,39 @@ func openStore(backend, path string) (store.Store, error) {
 	default:
 		return nil, fmt.Errorf("unknown backend %q", backend)
 	}
+}
+
+func cliDeviceSelector(spec string) secrets.DeviceSelector {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return secrets.DeviceSelectorFunc(func(_ context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
+			if len(devices) == 0 {
+				return hmacsecret.DeviceInfo{}, secrets.ErrNoDevice
+			}
+			for _, d := range devices {
+				fmt.Fprintf(os.Stderr, "[%d] %s / %s (%s)\n", d.Index, d.Product, d.Manufacturer, d.Path)
+			}
+			if len(devices) == 1 {
+				return devices[0], nil
+			}
+			fmt.Fprintf(os.Stderr, "device index [0-%d]: ", len(devices)-1)
+			line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+			if err != nil {
+				return hmacsecret.DeviceInfo{}, err
+			}
+			line = strings.TrimSpace(line)
+			if line == "" {
+				return devices[0], nil
+			}
+			idx, err := strconv.Atoi(line)
+			if err != nil || idx < 0 || idx >= len(devices) {
+				return hmacsecret.DeviceInfo{}, fmt.Errorf("invalid device index %q", line)
+			}
+			return devices[idx], nil
+		})
+	}
+	if idx, err := strconv.Atoi(spec); err == nil {
+		return secrets.DeviceByIndex(idx)
+	}
+	return secrets.DeviceByPath(spec)
 }

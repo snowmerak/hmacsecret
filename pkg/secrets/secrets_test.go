@@ -11,21 +11,23 @@ import (
 	"time"
 
 	"github.com/snowmerak/hmacsecret/lib/hmacsecret"
+	"github.com/snowmerak/hmacsecret/lib/store"
 	"github.com/snowmerak/hmacsecret/pkg/secrets"
 	"github.com/snowmerak/hmacsecret/pkg/store/pebble"
 )
 
 type mockAuth struct {
-	mu            sync.Mutex
-	createCalls   atomic.Int32
-	deriveCalls   atomic.Int32
-	createCred    *hmacsecret.Credential
-	deriveSecret  *hmacsecret.Secret
-	createErr     error
-	deriveErr     error
-	lastDerive    hmacsecret.DeriveOptions
-	createDelay   time.Duration
-	failFirstDer  bool
+	mu             sync.Mutex
+	createCalls    atomic.Int32
+	createCred     *hmacsecret.Credential
+	deriveSecret   *hmacsecret.Secret
+	createErr      error
+	deriveErr      error
+	lastDerive     hmacsecret.DeriveOptions
+	lastCreatePIN  string
+	lastDerivePIN  string
+	createDelay    time.Duration
+	failFirstDer   bool
 	deriveFailOnce atomic.Bool
 }
 
@@ -39,6 +41,7 @@ func (m *mockAuth) CreateCredential(opts hmacsecret.CreateOptions) (*hmacsecret.
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.lastCreatePIN = opts.PIN
 	cred := *m.createCred
 	n := m.createCalls.Load()
 	cred.ID = append(append([]byte(nil), m.createCred.ID...), byte(n))
@@ -47,9 +50,9 @@ func (m *mockAuth) CreateCredential(opts hmacsecret.CreateOptions) (*hmacsecret.
 }
 
 func (m *mockAuth) Derive(opts hmacsecret.DeriveOptions) (*hmacsecret.Secret, error) {
-	m.deriveCalls.Add(1)
 	m.mu.Lock()
 	m.lastDerive = opts
+	m.lastDerivePIN = opts.PIN
 	m.mu.Unlock()
 	if m.failFirstDer && m.deriveFailOnce.CompareAndSwap(false, true) {
 		return nil, errors.New("transient derive failure")
@@ -63,56 +66,65 @@ func (m *mockAuth) Derive(opts hmacsecret.DeriveOptions) (*hmacsecret.Secret, er
 	return &sec, nil
 }
 
-func TestCreateDeriveDelete(t *testing.T) {
-	ctx := context.Background()
+func newTestSecrets(t *testing.T, auth *mockAuth, pin secrets.PINProvider) *secrets.Secrets {
+	t.Helper()
 	st, err := pebble.Open(filepath.Join(t.TempDir(), "db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	credID := []byte{1, 2, 3, 4}
-	secret := bytes.Repeat([]byte{0x22}, 32)
-
-	auth := &mockAuth{
-		createCred: &hmacsecret.Credential{ID: credID, RPID: "example.com"},
-		deriveSecret: &hmacsecret.Secret{
-			HMACSecret: secret,
-		},
-	}
-
+	devices := []hmacsecret.DeviceInfo{{Index: 0, Path: "test://dev", Product: "mock"}}
 	svc, err := secrets.New(secrets.Options{
 		Store: st,
-		Open:  func(context.Context) (secrets.Authenticator, error) { return auth, nil },
-		RPID:  "example.com",
+		Devices: func(hmacsecret.ListOptions) ([]hmacsecret.DeviceInfo, error) {
+			return devices, nil
+		},
+		Open: func(string) (secrets.Authenticator, error) {
+			return auth, nil
+		},
+		Select: secrets.FirstDevice(),
+		PIN:    pin,
+		RPID:   "example.com",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return svc
+}
+
+func TestCreateDeriveDelete(t *testing.T) {
+	ctx := context.Background()
+	auth := &mockAuth{
+		createCred:   &hmacsecret.Credential{ID: []byte{1, 2, 3, 4}, RPID: "example.com"},
+		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x22}, 32)},
+	}
+	svc := newTestSecrets(t, auth, secrets.StaticPIN("1234"))
 
 	got, err := svc.Create(ctx, "db")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, secret) {
+	if !bytes.Equal(got, bytes.Repeat([]byte{0x22}, 32)) {
 		t.Fatalf("create secret mismatch")
+	}
+	if auth.lastCreatePIN != "1234" || auth.lastDerivePIN != "1234" {
+		t.Fatalf("pin not from provider: create=%q derive=%q", auth.lastCreatePIN, auth.lastDerivePIN)
 	}
 	if _, err := svc.Create(ctx, "db"); !errors.Is(err, secrets.ErrExists) {
 		t.Fatalf("dup create = %v", err)
 	}
 
+	// Different provider pin on a new service would be app wiring; same svc uses same provider.
 	got, err = svc.Derive(ctx, "db")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, secret) {
+	if !bytes.Equal(got, bytes.Repeat([]byte{0x22}, 32)) {
 		t.Fatalf("derive secret mismatch")
 	}
-	if len(auth.lastDerive.CredentialID) == 0 || len(auth.lastDerive.Salt) != hmacsecret.SaltSize {
+	if len(auth.lastDerive.Salt) != store.SaltSize || auth.lastDerive.RPID != "example.com" {
 		t.Fatalf("derive opts = %+v", auth.lastDerive)
-	}
-	if auth.lastDerive.RPID != "example.com" {
-		t.Fatalf("rp = %q", auth.lastDerive.RPID)
 	}
 
 	if err := svc.Delete(ctx, "db"); err != nil {
@@ -125,25 +137,12 @@ func TestCreateDeriveDelete(t *testing.T) {
 
 func TestCreateStoresBeforeDeriveFailure(t *testing.T) {
 	ctx := context.Background()
-	st, err := pebble.Open(filepath.Join(t.TempDir(), "db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
 	auth := &mockAuth{
 		createCred:   &hmacsecret.Credential{ID: []byte{9}, RPID: "example.com"},
 		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x33}, 32)},
 		failFirstDer: true,
 	}
-	svc, err := secrets.New(secrets.Options{
-		Store: st,
-		Open:  func(context.Context) (secrets.Authenticator, error) { return auth, nil },
-		RPID:  "example.com",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	svc := newTestSecrets(t, auth, secrets.NoPIN())
 
 	if _, err := svc.Create(ctx, "retry-me"); err == nil {
 		t.Fatal("expected create derive failure")
@@ -152,7 +151,6 @@ func TestCreateStoresBeforeDeriveFailure(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("has after failed create derive: ok=%v err=%v", ok, err)
 	}
-	// Retry via Derive should succeed with stored metadata.
 	got, err := svc.Derive(ctx, "retry-me")
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +160,7 @@ func TestCreateStoresBeforeDeriveFailure(t *testing.T) {
 	}
 }
 
-func TestConcurrentCreateSameAlias(t *testing.T) {
+func TestDeviceSelectorReceivesListing(t *testing.T) {
 	ctx := context.Background()
 	st, err := pebble.Open(filepath.Join(t.TempDir(), "db"))
 	if err != nil {
@@ -171,20 +169,50 @@ func TestConcurrentCreateSameAlias(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	auth := &mockAuth{
-		createCred: &hmacsecret.Credential{ID: []byte{1}, RPID: "example.com"},
-		deriveSecret: &hmacsecret.Secret{
-			HMACSecret: bytes.Repeat([]byte{0x22}, 32),
-		},
-		createDelay: 20 * time.Millisecond,
+		createCred:   &hmacsecret.Credential{ID: []byte{1}, RPID: "example.com"},
+		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x22}, 32)},
 	}
+	var seen []hmacsecret.DeviceInfo
 	svc, err := secrets.New(secrets.Options{
 		Store: st,
-		Open:  func(context.Context) (secrets.Authenticator, error) { return auth, nil },
-		RPID:  "example.com",
+		Devices: func(hmacsecret.ListOptions) ([]hmacsecret.DeviceInfo, error) {
+			return []hmacsecret.DeviceInfo{
+				{Index: 0, Path: "a", Product: "A"},
+				{Index: 1, Path: "b", Product: "B"},
+			}, nil
+		},
+		Open: func(path string) (secrets.Authenticator, error) {
+			if path != "b" {
+				t.Fatalf("opened %q want b", path)
+			}
+			return auth, nil
+		},
+		Select: secrets.DeviceSelectorFunc(func(_ context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
+			seen = append([]hmacsecret.DeviceInfo(nil), devices...)
+			return devices[1], nil
+		}),
+		PIN:  secrets.NoPIN(),
+		RPID: "example.com",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := svc.Create(ctx, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || seen[1].Path != "b" {
+		t.Fatalf("seen = %+v", seen)
+	}
+}
+
+func TestConcurrentCreateSameAlias(t *testing.T) {
+	ctx := context.Background()
+	auth := &mockAuth{
+		createCred:   &hmacsecret.Credential{ID: []byte{1}, RPID: "example.com"},
+		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x22}, 32)},
+		createDelay:  20 * time.Millisecond,
+	}
+	svc := newTestSecrets(t, auth, secrets.NoPIN())
 
 	const n = 8
 	var (

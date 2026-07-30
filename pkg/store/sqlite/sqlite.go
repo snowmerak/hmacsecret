@@ -92,6 +92,9 @@ SELECT credential_id, salt, rp_id FROM credentials WHERE alias = ?`, alias,
 	if err != nil {
 		return store.Record{}, fmt.Errorf("sqlite get: %w", err)
 	}
+	if err := store.ValidateRecord(rec); err != nil {
+		return store.Record{}, err
+	}
 	return rec, nil
 }
 

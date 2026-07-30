@@ -99,12 +99,16 @@ func (s *Store) Get(ctx context.Context, alias string) (store.Record, error) {
 	if err := json.Unmarshal(val, &body); err != nil {
 		return store.Record{}, fmt.Errorf("pebble unmarshal: %w", err)
 	}
-	return store.Record{
+	rec := store.Record{
 		Alias:        alias,
 		CredentialID: append([]byte(nil), body.CredentialID...),
 		Salt:         append([]byte(nil), body.Salt...),
 		RPID:         body.RPID,
-	}, nil
+	}
+	if err := store.ValidateRecord(rec); err != nil {
+		return store.Record{}, err
+	}
+	return rec, nil
 }
 
 // Delete implements store.Store.
