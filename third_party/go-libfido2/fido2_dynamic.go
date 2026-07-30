@@ -1,4 +1,4 @@
-// +build dynamic
+//go:build dynamic && hmacsecret_libfido2
 
 package libfido2
 

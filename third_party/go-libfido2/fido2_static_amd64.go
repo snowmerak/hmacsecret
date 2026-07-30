@@ -1,3 +1,5 @@
+//go:build hmacsecret_libfido2
+
 package libfido2
 
 /*

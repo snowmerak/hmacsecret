@@ -1,4 +1,4 @@
-//go:build cgo
+//go:build cgo && hmacsecret_libfido2
 
 // Package hmacsecret derives secrets with the FIDO2 hmac-secret extension.
 //
@@ -16,78 +16,14 @@
 //   - ClientDataJSON is required and auto-generated when omitted.
 //
 // Linux: CGO + libfido2-dev; HID devices are listed directly and PIN is console input.
-//
 package hmacsecret
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
 	libfido2 "github.com/snowmerak/hmacsecret/third_party/go-libfido2"
 )
-
-// Sentinel errors for callers.
-var (
-	ErrInvalidArgument    = errors.New("invalid argument")
-	ErrNoDevice           = errors.New("no FIDO2 device found")
-	ErrNoSelectableDevice = errors.New("no selectable FIDO2 device")
-	ErrDeviceSearch       = errors.New("FIDO2 device search failed")
-	ErrOpenDevice         = errors.New("open FIDO2 device failed")
-	ErrNotFIDO2           = errors.New("device does not support FIDO2/CTAP2")
-	ErrEmptyHMACSecret    = errors.New("authenticator returned empty hmac-secret")
-	ErrUnsupportedBuild   = errors.New("hmacsecret requires CGO and native libfido2")
-)
-
-// CreateOptions configures non-discoverable hmac-secret credential creation.
-type CreateOptions struct {
-	// RPID is required and binds the credential to a relying party id.
-	RPID string
-	// RPName is optional display name for the RP.
-	RPName string
-	// UserName is required by many authenticators.
-	UserName string
-	// UserDisplayName defaults to UserName when empty.
-	UserDisplayName string
-	// UserID defaults to 32 random bytes when empty.
-	UserID []byte
-	// PIN is the authenticator PIN. Windows Hello uses Security UI instead.
-	PIN string
-	// ClientDataJSON overrides auto-generated webauthn.create client data.
-	ClientDataJSON []byte
-}
-
-// DeriveOptions configures hmac-secret derivation from an existing credential.
-type DeriveOptions struct {
-	// RPID must match the RP id used at credential creation.
-	RPID string
-	// CredentialID is the non-discoverable credential id to assert.
-	CredentialID []byte
-	// Salt must be exactly SaltSize bytes.
-	Salt []byte
-	// PIN is the authenticator PIN. Windows Hello uses Security UI instead.
-	PIN string
-	// UserPresence requests UP during assertion. Default true when unset via Derive.
-	// Use UserPresenceSet to force false.
-	UserPresence    bool
-	UserPresenceSet bool
-	// ClientDataJSON overrides auto-generated webauthn.get client data.
-	ClientDataJSON []byte
-}
-
-// Credential is a created hmac-secret-enabled credential.
-type Credential struct {
-	ID     []byte
-	RPID   string
-	PubKey []byte
-}
-
-// Secret is a derived hmac-secret value plus the inputs needed to reproduce it.
-type Secret struct {
-	CredentialID []byte
-	Salt         []byte
-	HMACSecret   []byte
-}
 
 // CreateCredential registers a non-discoverable credential with hmac-secret enabled.
 func (d *Device) CreateCredential(opts CreateOptions) (*Credential, error) {

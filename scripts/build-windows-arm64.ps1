@@ -1,5 +1,4 @@
 param(
-    [string]$MSYS2Root = "C:\msys64",
     [string]$Package = "./cmd/hmac-secret",
     [string]$Output = ""
 )
@@ -7,7 +6,6 @@ param(
 $buildScript = Join-Path $PSScriptRoot "build-windows.ps1"
 & $buildScript `
     -Architecture arm64 `
-    -MSYS2Root $MSYS2Root `
     -Package $Package `
     -Output $Output
 exit $LASTEXITCODE

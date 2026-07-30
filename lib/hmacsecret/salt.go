@@ -1,5 +1,3 @@
-//go:build cgo
-
 package hmacsecret
 
 import (
@@ -7,9 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 )
-
-// SaltSize is the hmac-secret salt length required by CTAP2.
-const SaltSize = 32
 
 // ParseSalt decodes a 32-byte hex salt, or generates a random salt when value is empty.
 // generated is true only when a new salt was created.

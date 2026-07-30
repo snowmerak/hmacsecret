@@ -1,4 +1,4 @@
-//go:build cgo
+//go:build cgo && hmacsecret_libfido2
 
 package hmacsecret
 
@@ -7,24 +7,6 @@ import (
 
 	libfido2 "github.com/snowmerak/hmacsecret/third_party/go-libfido2"
 )
-
-// DeviceInfo describes a discovered FIDO2 authenticator.
-type DeviceInfo struct {
-	Index        int
-	Path         string
-	Product      string
-	Manufacturer string
-	ProductID    int16
-	VendorID     int16
-	WindowsHello bool
-}
-
-// ListOptions controls device discovery.
-type ListOptions struct {
-	// ExcludeWindowsWebAuthn excludes the windows://hello WebAuthn broker.
-	// Windows only; ignored elsewhere. Zero value keeps WebAuthn enabled.
-	ExcludeWindowsWebAuthn bool
-}
 
 // Device is an open handle to a FIDO2 authenticator path.
 type Device struct {
