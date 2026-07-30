@@ -83,6 +83,24 @@ go build -trimpath -o hmac-secret-arm64.exe ./cmd/hmac-secret
 The low-level API is in `lib/hmacsecret`. The higher-level alias and storage
 service is in `pkg/secrets`.
 
+Derived HMAC secrets are copied directly from native FIDO/WebAuthn-owned memory
+into a `memguard.LockedBuffer`, sealed, and returned as `*memguard.Enclave`.
+Open an enclave only when the plaintext is needed, and destroy the returned
+locked buffer immediately after use:
+
+```go
+secret, err := service.Derive(ctx, "my-secret")
+if err != nil {
+	return err
+}
+plaintext, err := secret.Open()
+if err != nil {
+	return err
+}
+defer plaintext.Destroy()
+// Use plaintext.Bytes() without copying it into an ordinary Go allocation.
+```
+
 Normal macOS and Linux CGO builds use the bundled patched Go bindings and link
 against the system libfido2. The bundled native libfido2 sources are retained
 only for the explicit Windows compatibility/reference backend; that non-default

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/awnumar/memguard"
+
 	"github.com/snowmerak/hmacsecret/lib/hmacsecret"
 	libsecrets "github.com/snowmerak/hmacsecret/lib/secrets"
 	"github.com/snowmerak/hmacsecret/lib/store"
@@ -21,7 +23,7 @@ type mockAuth struct {
 	mu             sync.Mutex
 	createCalls    atomic.Int32
 	createCred     *hmacsecret.Credential
-	deriveSecret   *hmacsecret.Secret
+	deriveValue    []byte
 	createErr      error
 	deriveErr      error
 	lastDerive     hmacsecret.DeriveOptions
@@ -61,10 +63,12 @@ func (m *mockAuth) Derive(opts hmacsecret.DeriveOptions) (*hmacsecret.Secret, er
 	if m.deriveErr != nil {
 		return nil, m.deriveErr
 	}
-	sec := *m.deriveSecret
-	sec.CredentialID = append([]byte(nil), opts.CredentialID...)
-	sec.Salt = append([]byte(nil), opts.Salt...)
-	return &sec, nil
+	plaintext := append([]byte(nil), m.deriveValue...)
+	return &hmacsecret.Secret{
+		CredentialID: append([]byte(nil), opts.CredentialID...),
+		Salt:         append([]byte(nil), opts.Salt...),
+		HMACSecret:   memguard.NewEnclave(plaintext),
+	}, nil
 }
 
 type staticPIN string
@@ -112,8 +116,8 @@ func newTestSecrets(t *testing.T, auth *mockAuth, pin libsecrets.PINProvider) *s
 func TestCreateDeriveDelete(t *testing.T) {
 	ctx := context.Background()
 	auth := &mockAuth{
-		createCred:   &hmacsecret.Credential{ID: []byte{1, 2, 3, 4}, RPID: "example.com"},
-		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x22}, 32)},
+		createCred:  &hmacsecret.Credential{ID: []byte{1, 2, 3, 4}, RPID: "example.com"},
+		deriveValue: bytes.Repeat([]byte{0x22}, 32),
 	}
 	svc := newTestSecrets(t, auth, staticPIN("1234"))
 
@@ -121,7 +125,7 @@ func TestCreateDeriveDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, bytes.Repeat([]byte{0x22}, 32)) {
+	if !enclaveEqual(t, got, bytes.Repeat([]byte{0x22}, 32)) {
 		t.Fatalf("create secret mismatch")
 	}
 	if auth.lastCreatePIN != "1234" || auth.lastDerivePIN != "1234" {
@@ -135,7 +139,7 @@ func TestCreateDeriveDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, bytes.Repeat([]byte{0x22}, 32)) {
+	if !enclaveEqual(t, got, bytes.Repeat([]byte{0x22}, 32)) {
 		t.Fatalf("derive secret mismatch")
 	}
 	if len(auth.lastDerive.Salt) != store.SaltSize || auth.lastDerive.RPID != "example.com" {
@@ -154,7 +158,7 @@ func TestCreateStoresBeforeDeriveFailure(t *testing.T) {
 	ctx := context.Background()
 	auth := &mockAuth{
 		createCred:   &hmacsecret.Credential{ID: []byte{9}, RPID: "example.com"},
-		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x33}, 32)},
+		deriveValue:  bytes.Repeat([]byte{0x33}, 32),
 		failFirstDer: true,
 	}
 	svc := newTestSecrets(t, auth, staticPIN(""))
@@ -170,7 +174,7 @@ func TestCreateStoresBeforeDeriveFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, bytes.Repeat([]byte{0x33}, 32)) {
+	if !enclaveEqual(t, got, bytes.Repeat([]byte{0x33}, 32)) {
 		t.Fatalf("retry secret mismatch")
 	}
 }
@@ -184,8 +188,8 @@ func TestDeviceSelectorReceivesListing(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	auth := &mockAuth{
-		createCred:   &hmacsecret.Credential{ID: []byte{1}, RPID: "example.com"},
-		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x22}, 32)},
+		createCred:  &hmacsecret.Credential{ID: []byte{1}, RPID: "example.com"},
+		deriveValue: bytes.Repeat([]byte{0x22}, 32),
 	}
 	var seen []hmacsecret.DeviceInfo
 	svc, err := secrets.New(secrets.Options{
@@ -223,9 +227,9 @@ func TestDeviceSelectorReceivesListing(t *testing.T) {
 func TestConcurrentCreateSameAlias(t *testing.T) {
 	ctx := context.Background()
 	auth := &mockAuth{
-		createCred:   &hmacsecret.Credential{ID: []byte{1}, RPID: "example.com"},
-		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x22}, 32)},
-		createDelay:  20 * time.Millisecond,
+		createCred:  &hmacsecret.Credential{ID: []byte{1}, RPID: "example.com"},
+		deriveValue: bytes.Repeat([]byte{0x22}, 32),
+		createDelay: 20 * time.Millisecond,
 	}
 	svc := newTestSecrets(t, auth, staticPIN(""))
 
@@ -263,4 +267,17 @@ func TestConcurrentCreateSameAlias(t *testing.T) {
 	if auth.createCalls.Load() != 1 {
 		t.Fatalf("createCalls=%d want 1", auth.createCalls.Load())
 	}
+}
+
+func enclaveEqual(t *testing.T, enclave *memguard.Enclave, want []byte) bool {
+	t.Helper()
+	if enclave == nil {
+		return false
+	}
+	secret, err := enclave.Open()
+	if err != nil {
+		t.Fatalf("open enclave: %v", err)
+	}
+	defer secret.Destroy()
+	return secret.EqualTo(want)
 }

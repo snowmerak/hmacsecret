@@ -171,14 +171,14 @@ func (d *Device) Derive(opts DeriveOptions) (*Secret, error) {
 	if err != nil {
 		return nil, fmt.Errorf("hmac-secret assertion: %w", err)
 	}
-	if len(assertion.HMACSecret) == 0 {
+	if assertion.HMACSecret == nil || assertion.HMACSecret.Size() == 0 {
 		return nil, ErrEmptyHMACSecret
 	}
 
 	return &Secret{
 		CredentialID: append([]byte(nil), opts.CredentialID...),
 		Salt:         append([]byte(nil), opts.Salt...),
-		HMACSecret:   append([]byte(nil), assertion.HMACSecret...),
+		HMACSecret:   assertion.HMACSecret,
 	}, nil
 }
 

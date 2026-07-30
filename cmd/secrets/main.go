@@ -7,10 +7,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/awnumar/memguard"
 
 	"github.com/snowmerak/hmacsecret/lib/hmacsecret"
 	libsecrets "github.com/snowmerak/hmacsecret/lib/secrets"
@@ -24,9 +27,15 @@ import (
 )
 
 func main() {
+	memguard.CatchInterrupt()
+	exitCode := 0
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		exitCode = 1
+	}
+	memguard.Purge()
+	if exitCode != 0 {
+		os.Exit(exitCode)
 	}
 }
 
@@ -104,8 +113,7 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Printf("alias=%s\n", alias)
-		fmt.Printf("hmac_secret=%s\n", hex.EncodeToString(secret))
-		return nil
+		return writeEnclaveHex(os.Stdout, "hmac_secret=", secret)
 	case "derive", "get":
 		if alias == "" {
 			return errors.New("derive requires alias")
@@ -115,8 +123,7 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Printf("alias=%s\n", alias)
-		fmt.Printf("hmac_secret=%s\n", hex.EncodeToString(secret))
-		return nil
+		return writeEnclaveHex(os.Stdout, "hmac_secret=", secret)
 	case "delete", "rm":
 		if alias == "" {
 			return errors.New("delete requires alias")
@@ -144,6 +151,28 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
+}
+
+func writeEnclaveHex(w io.Writer, prefix string, enclave *memguard.Enclave) error {
+	if enclave == nil {
+		return hmacsecret.ErrEmptyHMACSecret
+	}
+	secret, err := enclave.Open()
+	if err != nil {
+		return fmt.Errorf("open hmac-secret enclave: %w", err)
+	}
+	defer secret.Destroy()
+
+	if _, err := io.WriteString(w, prefix); err != nil {
+		return fmt.Errorf("write hmac-secret prefix: %w", err)
+	}
+	if _, err := hex.NewEncoder(w).Write(secret.Bytes()); err != nil {
+		return fmt.Errorf("write hmac-secret: %w", err)
+	}
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		return fmt.Errorf("write hmac-secret newline: %w", err)
+	}
+	return nil
 }
 
 func openStore(backend, path string) (store.Store, error) {

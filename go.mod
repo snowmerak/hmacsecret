@@ -3,6 +3,7 @@ module github.com/snowmerak/hmacsecret
 go 1.26.5
 
 require (
+	github.com/awnumar/memguard v0.23.0
 	github.com/cockroachdb/pebble/v2 v2.1.6
 	github.com/pkg/errors v0.9.1
 	golang.org/x/sys v0.46.0
@@ -14,6 +15,7 @@ require (
 	github.com/DataDog/zstd v1.5.7 // indirect
 	github.com/RaduBerinde/axisds v0.1.0 // indirect
 	github.com/RaduBerinde/btreemap v0.0.0-20250419174037-3d62b7205d54 // indirect
+	github.com/awnumar/memcall v0.4.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cockroachdb/crlib v0.0.0-20241112164430-1264a2edc35b // indirect
@@ -41,8 +43,9 @@ require (
 	github.com/prometheus/procfs v0.10.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
+	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df // indirect
-	golang.org/x/text v0.14.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 	modernc.org/libc v1.74.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

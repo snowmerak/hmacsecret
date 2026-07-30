@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/awnumar/memguard"
+
 	"github.com/snowmerak/hmacsecret/lib/hmacsecret"
 	libsecrets "github.com/snowmerak/hmacsecret/lib/secrets"
 	"github.com/snowmerak/hmacsecret/lib/store"
@@ -120,11 +122,11 @@ func New(opts Options) (*Secrets, error) {
 }
 
 // Create registers a new FIDO hmac-secret credential under alias and returns
-// the derived secret bytes.
+// the derived secret sealed in a memguard Enclave.
 //
 // Order: generate salt → CreateCredential → store.Put → Derive.
 // If the first Derive fails, metadata is stored so Derive(alias) can retry.
-func (s *Secrets) Create(ctx context.Context, alias string) ([]byte, error) {
+func (s *Secrets) Create(ctx context.Context, alias string) (*memguard.Enclave, error) {
 	alias = strings.TrimSpace(alias)
 	if err := store.ValidateAlias(alias); err != nil {
 		return nil, ErrInvalidAlias
@@ -183,11 +185,11 @@ func (s *Secrets) Create(ctx context.Context, alias string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("secrets create derive: %w", err)
 	}
-	return append([]byte(nil), sec.HMACSecret...), nil
+	return sec.HMACSecret, nil
 }
 
-// Derive re-derives the hmac-secret for an existing alias.
-func (s *Secrets) Derive(ctx context.Context, alias string) ([]byte, error) {
+// Derive re-derives the hmac-secret and returns it sealed in a memguard Enclave.
+func (s *Secrets) Derive(ctx context.Context, alias string) (*memguard.Enclave, error) {
 	alias = strings.TrimSpace(alias)
 	if err := store.ValidateAlias(alias); err != nil {
 		return nil, ErrInvalidAlias
@@ -215,7 +217,7 @@ func (s *Secrets) Derive(ctx context.Context, alias string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("secrets derive fido: %w", err)
 	}
-	return append([]byte(nil), sec.HMACSecret...), nil
+	return sec.HMACSecret, nil
 }
 
 // Delete removes stored metadata for alias. Does not touch the authenticator.
