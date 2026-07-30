@@ -1,4 +1,4 @@
-//go:build dynamic && hmacsecret_libfido2
+//go:build cgo && dynamic && (linux || hmacsecret_libfido2)
 
 package libfido2
 

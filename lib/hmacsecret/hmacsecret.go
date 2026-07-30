@@ -1,4 +1,4 @@
-//go:build cgo && hmacsecret_libfido2
+//go:build cgo && (linux || hmacsecret_libfido2)
 
 // Package hmacsecret derives secrets with the FIDO2 hmac-secret extension.
 //
@@ -15,7 +15,8 @@
 //   - Pass empty PIN for the broker path; PIN/touch are handled by Security UI.
 //   - ClientDataJSON is required and auto-generated when omitted.
 //
-// Linux: CGO + libfido2-dev; HID devices are listed directly and PIN is console input.
+// Linux: normal CGO builds link the system libfido2 without a custom build tag.
+// HID devices are listed directly and PIN is console input.
 package hmacsecret
 
 import (

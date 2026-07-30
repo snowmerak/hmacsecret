@@ -27,7 +27,25 @@ go run ./cmd/secrets derive my-secret
 Credential IDs, salts, and RP IDs are stored by the CLI. The derived secret is
 not stored.
 
-## Build
+## Linux
+
+Linux uses the system libfido2 automatically when CGO is enabled. No custom
+build tag is required.
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt-get install build-essential libfido2-dev
+CGO_ENABLED=1 go build -trimpath -o hmac-secret ./cmd/hmac-secret
+CGO_ENABLED=1 go build -trimpath -o secrets ./cmd/secrets
+CGO_ENABLED=1 go run ./cmd/hmac-secret -list
+CGO_ENABLED=1 go run ./cmd/secrets list
+```
+
+With `CGO_ENABLED=0`, Linux builds use the unsupported-platform stub and cannot
+access an authenticator.
+
+## Windows cross-build
 
 ```powershell
 go build -trimpath -o hmac-secret.exe ./cmd/hmac-secret
@@ -48,7 +66,7 @@ go build -trimpath -o hmac-secret-arm64.exe ./cmd/hmac-secret
 The low-level API is in `lib/hmacsecret`. The higher-level alias and storage
 service is in `pkg/secrets`.
 
-The bundled patched libfido2 implementation is retained only as an explicit
-compatibility/reference backend. It is excluded from normal builds and tests.
-Enable it with the `hmacsecret_libfido2` build tag only in an environment with
-its native toolchain and libraries installed.
+Normal Linux CGO builds use the bundled patched Go bindings and link against
+the system libfido2. The bundled native libfido2 sources are retained only for
+the explicit Windows compatibility/reference backend; that non-default backend
+still uses the `hmacsecret_libfido2` build tag and requires its native toolchain.

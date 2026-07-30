@@ -1,4 +1,4 @@
-//go:build !windows && !hmacsecret_libfido2
+//go:build !windows && (!cgo || (!linux && !hmacsecret_libfido2))
 
 package hmacsecret
 
