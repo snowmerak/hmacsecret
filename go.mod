@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/cockroachdb/pebble/v2 v2.1.6
-	github.com/keys-pub/go-libfido2 v1.5.3
+	github.com/pkg/errors v0.9.1
 	golang.org/x/term v0.34.0
 	modernc.org/sqlite v1.55.0
 )
@@ -34,7 +34,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/minio/minlz v1.0.1-0.20250507153514-87eb42fe8882 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.16.0 // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.42.0 // indirect
@@ -49,5 +48,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/keys-pub/go-libfido2 => ./third_party/go-libfido2

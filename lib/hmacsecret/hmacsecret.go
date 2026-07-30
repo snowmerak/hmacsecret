@@ -24,19 +24,19 @@ import (
 	"fmt"
 	"strings"
 
-	libfido2 "github.com/keys-pub/go-libfido2"
+	libfido2 "github.com/snowmerak/hmacsecret/third_party/go-libfido2"
 )
 
 // Sentinel errors for callers.
 var (
-	ErrInvalidArgument     = errors.New("invalid argument")
-	ErrNoDevice            = errors.New("no FIDO2 device found")
-	ErrNoSelectableDevice  = errors.New("no selectable FIDO2 device")
-	ErrDeviceSearch        = errors.New("FIDO2 device search failed")
-	ErrOpenDevice          = errors.New("open FIDO2 device failed")
-	ErrNotFIDO2            = errors.New("device does not support FIDO2/CTAP2")
-	ErrEmptyHMACSecret     = errors.New("authenticator returned empty hmac-secret")
-	ErrUnsupportedBuild    = errors.New("hmacsecret requires CGO and native libfido2")
+	ErrInvalidArgument    = errors.New("invalid argument")
+	ErrNoDevice           = errors.New("no FIDO2 device found")
+	ErrNoSelectableDevice = errors.New("no selectable FIDO2 device")
+	ErrDeviceSearch       = errors.New("FIDO2 device search failed")
+	ErrOpenDevice         = errors.New("open FIDO2 device failed")
+	ErrNotFIDO2           = errors.New("device does not support FIDO2/CTAP2")
+	ErrEmptyHMACSecret    = errors.New("authenticator returned empty hmac-secret")
+	ErrUnsupportedBuild   = errors.New("hmacsecret requires CGO and native libfido2")
 )
 
 // CreateOptions configures non-discoverable hmac-secret credential creation.

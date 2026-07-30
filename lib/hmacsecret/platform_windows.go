@@ -5,7 +5,7 @@ package hmacsecret
 import (
 	"strings"
 
-	libfido2 "github.com/keys-pub/go-libfido2"
+	libfido2 "github.com/snowmerak/hmacsecret/third_party/go-libfido2"
 )
 
 const windowsHelloPath = "windows://hello"
