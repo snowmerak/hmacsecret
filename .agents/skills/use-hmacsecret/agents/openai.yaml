@@ -1,0 +1,4 @@
+interface:
+  display_name: "Integrate hmacsecret"
+  short_description: "Integrate FIDO2-derived secrets in Go"
+  default_prompt: "Use $use-hmacsecret to integrate FIDO2-backed deterministic secrets into this Go application."
