@@ -1,0 +1,7 @@
+*.exe
+*.dll
+*.so
+*.dylib
+/hmac-secret
+/hmac-secret-linux
+/.native/
