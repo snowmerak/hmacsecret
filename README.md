@@ -30,16 +30,18 @@ not stored.
 ## Build
 
 ```powershell
-.\scripts\build-windows-arm64.ps1
-.\scripts\build-windows-amd64.ps1
-
-# Build the alias-based CLI instead.
-.\scripts\build-windows-arm64.ps1 `
-    -Package ./cmd/secrets `
-    -Output secrets-arm64.exe
+go build -trimpath -o hmac-secret.exe ./cmd/hmac-secret
+go build -trimpath -o secrets.exe ./cmd/secrets
 ```
 
-The scripts always set `CGO_ENABLED=0`.
+To cross-compile for Windows ARM64:
+
+```powershell
+$env:CGO_ENABLED = "0"
+$env:GOOS = "windows"
+$env:GOARCH = "arm64"
+go build -trimpath -o hmac-secret-arm64.exe ./cmd/hmac-secret
+```
 
 ## Go API
 

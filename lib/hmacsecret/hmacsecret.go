@@ -6,8 +6,8 @@
 // secret from a credential + 32-byte salt. Results are deterministic for the
 // same authenticator, credential, and salt.
 //
-// Windows (practice/fido WebAuthn PRF path):
-//   - Use scripts/build-windows-arm64.ps1 (defaults to WebAuthn PRF libfido2).
+// Windows (compatibility libfido2 WebAuthn PRF path):
+//   - Build with the hmacsecret_libfido2 tag and the required native toolchain.
 //   - ListDevices shows windows://hello broker, not individual USB product names.
 //   - CreateCredential/Derive open that broker; Windows Security UI lets the user
 //     pick the external security key (e.g. T120). CROSS_PLATFORM is applied inside
