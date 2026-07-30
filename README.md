@@ -45,6 +45,23 @@ CGO_ENABLED=1 go run ./cmd/secrets list
 With `CGO_ENABLED=0`, Linux builds use the unsupported-platform stub and cannot
 access an authenticator.
 
+## macOS
+
+macOS uses Homebrew libfido2 automatically when CGO is enabled. Both Apple
+Silicon and Intel Homebrew installations are supported, and no custom build
+tag is required.
+
+```bash
+brew install pkg-config libfido2
+CGO_ENABLED=1 go build -trimpath -o hmac-secret ./cmd/hmac-secret
+CGO_ENABLED=1 go build -trimpath -o secrets ./cmd/secrets
+CGO_ENABLED=1 go run ./cmd/hmac-secret -list
+CGO_ENABLED=1 go run ./cmd/secrets list
+```
+
+With `CGO_ENABLED=0`, macOS builds use the unsupported-platform stub and cannot
+access an authenticator.
+
 ## Windows cross-build
 
 ```powershell
@@ -66,7 +83,8 @@ go build -trimpath -o hmac-secret-arm64.exe ./cmd/hmac-secret
 The low-level API is in `lib/hmacsecret`. The higher-level alias and storage
 service is in `pkg/secrets`.
 
-Normal Linux CGO builds use the bundled patched Go bindings and link against
-the system libfido2. The bundled native libfido2 sources are retained only for
-the explicit Windows compatibility/reference backend; that non-default backend
-still uses the `hmacsecret_libfido2` build tag and requires its native toolchain.
+Normal macOS and Linux CGO builds use the bundled patched Go bindings and link
+against the system libfido2. The bundled native libfido2 sources are retained
+only for the explicit Windows compatibility/reference backend; that non-default
+backend still uses the `hmacsecret_libfido2` build tag and requires its native
+toolchain.

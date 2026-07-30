@@ -1,4 +1,4 @@
-//go:build cgo && (linux || hmacsecret_libfido2)
+//go:build cgo && (darwin || linux || hmacsecret_libfido2)
 
 package hmacsecret
 
