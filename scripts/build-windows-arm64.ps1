@@ -96,6 +96,7 @@ try {
 		/*
 		 * NOTE: webauthn.dll ignores requests to enable hmac-secret
 '@
+        $hmacAnchor = $hmacAnchor.Replace("`r`n", "`n")
         $hmacReplacement = @'
 	if (in->attr.mask & FIDO_EXT_HMAC_SECRET) {
 		/*
@@ -111,6 +112,7 @@ try {
 		/*
 		 * NOTE: webauthn.dll ignores requests to enable hmac-secret
 '@
+        $hmacReplacement = $hmacReplacement.Replace("`r`n", "`n")
         if (-not $winhello.Contains($hmacAnchor)) {
             throw "winhello.c에서 hmac-secret 패치 위치를 찾지 못했습니다"
         }
@@ -122,6 +124,7 @@ try {
 	opt->dwAuthenticatorAttachment =
 	    WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM;
 '@
+        $timeoutReplacement = $timeoutReplacement.Replace("`r`n", "`n")
         $timeoutCount = ([regex]::Matches(
             $winhello,
             [regex]::Escape($timeoutAnchor)
