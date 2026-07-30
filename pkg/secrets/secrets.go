@@ -1,7 +1,7 @@
 // Package secrets provides a simple alias-based API over hmacsecret + store.
 //
-// Public methods take only alias (the store primary key). Authenticator
-// selection and PIN collection are injected via DeviceSelector and PINProvider.
+// Public methods take only alias (store primary key). Authenticator selection
+// and PIN collection are injected via lib/secrets.DeviceSelector and PINProvider.
 package secrets
 
 import (
@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/snowmerak/hmacsecret/lib/hmacsecret"
+	libsecrets "github.com/snowmerak/hmacsecret/lib/secrets"
 	"github.com/snowmerak/hmacsecret/lib/store"
 )
 
@@ -23,42 +24,6 @@ var (
 	ErrNotFound     = errors.New("secrets: alias not found")
 	ErrNoDevice     = errors.New("secrets: no authenticator")
 )
-
-// Operation identifies why an authenticator interaction is requested.
-type Operation string
-
-const (
-	OpCreate Operation = "create"
-	OpDerive Operation = "derive"
-)
-
-// DeviceSelector chooses one device from a freshly listed set.
-// It returns a DeviceInfo (path); Secrets opens the device after selection.
-type DeviceSelector interface {
-	Select(ctx context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error)
-}
-
-// DeviceSelectorFunc adapts a function to DeviceSelector.
-type DeviceSelectorFunc func(ctx context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error)
-
-// Select implements DeviceSelector.
-func (f DeviceSelectorFunc) Select(ctx context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
-	return f(ctx, devices)
-}
-
-// PINProvider returns a PIN for the selected device and operation.
-// Return "" when the platform collects PIN/UV itself (e.g. Windows WebAuthn).
-type PINProvider interface {
-	Provide(ctx context.Context, op Operation, device hmacsecret.DeviceInfo) (string, error)
-}
-
-// PINProviderFunc adapts a function to PINProvider.
-type PINProviderFunc func(ctx context.Context, op Operation, device hmacsecret.DeviceInfo) (string, error)
-
-// Provide implements PINProvider.
-func (f PINProviderFunc) Provide(ctx context.Context, op Operation, device hmacsecret.DeviceInfo) (string, error) {
-	return f(ctx, op, device)
-}
 
 // Authenticator is the FIDO surface secrets needs after a device is opened.
 // *hmacsecret.Device satisfies this interface.
@@ -76,13 +41,12 @@ type Options struct {
 	// Open opens a device path. Defaults to hmacsecret.Open.
 	Open func(path string) (Authenticator, error)
 	// Select chooses a device from the listed set. Required.
-	Select DeviceSelector
+	Select libsecrets.DeviceSelector
 	// PIN provides a PIN after device selection. Required.
-	// Use NoPIN() when the OS UI handles UV (Windows WebAuthn).
-	PIN PINProvider
+	PIN libsecrets.PINProvider
 	// ListOptions is passed to Devices on each call.
 	ListOptions hmacsecret.ListOptions
-	// RPID binds newly created credentials (stored per alias). Defaults to hmac-secret.example.
+	// RPID binds newly created credentials (stored per alias).
 	RPID string
 	// RPName is optional RP display name for create.
 	RPName string
@@ -91,19 +55,18 @@ type Options struct {
 }
 
 // Secrets is the high-level alias API.
-// Callers pass alias every time; nothing about alias is fixed in Options.
+// Callers pass alias every time; alias is never fixed in Options.
 type Secrets struct {
 	store    store.Store
 	devices  func(hmacsecret.ListOptions) ([]hmacsecret.DeviceInfo, error)
 	open     func(path string) (Authenticator, error)
-	select_  DeviceSelector
-	pin      PINProvider
+	select_  libsecrets.DeviceSelector
+	pin      libsecrets.PINProvider
 	listOpts hmacsecret.ListOptions
 	rpID     string
 	rpName   string
 	userName string
 
-	// createMu serializes Create: Has → enroll → Put (no double UI / orphans).
 	createMu sync.Mutex
 }
 
@@ -157,7 +120,7 @@ func New(opts Options) (*Secrets, error) {
 }
 
 // Create registers a new FIDO hmac-secret credential under alias and returns
-// the derived secret bytes. alias is the store primary key for this credential.
+// the derived secret bytes.
 //
 // Order: generate salt → CreateCredential → store.Put → Derive.
 // If the first Derive fails, metadata is stored so Derive(alias) can retry.
@@ -183,11 +146,10 @@ func (s *Secrets) Create(ctx context.Context, alias string) ([]byte, error) {
 		return nil, fmt.Errorf("secrets create salt: %w", err)
 	}
 
-	auth, info, pin, err := s.openSelected(ctx, OpCreate)
+	auth, pin, err := s.openSelected(ctx, libsecrets.OpCreate)
 	if err != nil {
 		return nil, err
 	}
-	_ = info
 
 	cred, err := auth.CreateCredential(hmacsecret.CreateOptions{
 		RPID:     s.rpID,
@@ -225,7 +187,6 @@ func (s *Secrets) Create(ctx context.Context, alias string) ([]byte, error) {
 }
 
 // Derive re-derives the hmac-secret for an existing alias.
-// alias is looked up in the store (credential_id + salt + rp_id).
 func (s *Secrets) Derive(ctx context.Context, alias string) ([]byte, error) {
 	alias = strings.TrimSpace(alias)
 	if err := store.ValidateAlias(alias); err != nil {
@@ -240,7 +201,7 @@ func (s *Secrets) Derive(ctx context.Context, alias string) ([]byte, error) {
 		return nil, fmt.Errorf("secrets derive store: %w", err)
 	}
 
-	auth, _, pin, err := s.openSelected(ctx, OpDerive)
+	auth, pin, err := s.openSelected(ctx, libsecrets.OpDerive)
 	if err != nil {
 		return nil, err
 	}
@@ -294,92 +255,34 @@ func (s *Secrets) List(ctx context.Context) ([]string, error) {
 	return aliases, nil
 }
 
-func (s *Secrets) openSelected(ctx context.Context, op Operation) (Authenticator, hmacsecret.DeviceInfo, string, error) {
+func (s *Secrets) openSelected(ctx context.Context, op libsecrets.Operation) (Authenticator, string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, hmacsecret.DeviceInfo{}, "", err
+		return nil, "", err
 	}
 	devices, err := s.devices(s.listOpts)
 	if err != nil {
-		return nil, hmacsecret.DeviceInfo{}, "", fmt.Errorf("%w: %v", ErrNoDevice, err)
+		return nil, "", fmt.Errorf("%w: %v", ErrNoDevice, err)
 	}
 	if len(devices) == 0 {
-		return nil, hmacsecret.DeviceInfo{}, "", ErrNoDevice
+		return nil, "", ErrNoDevice
 	}
 
 	info, err := s.select_.Select(ctx, devices)
 	if err != nil {
-		return nil, hmacsecret.DeviceInfo{}, "", fmt.Errorf("%w: %v", ErrNoDevice, err)
+		return nil, "", fmt.Errorf("%w: %v", ErrNoDevice, err)
 	}
 	if strings.TrimSpace(info.Path) == "" {
-		return nil, hmacsecret.DeviceInfo{}, "", fmt.Errorf("%w: empty device path", ErrNoDevice)
+		return nil, "", fmt.Errorf("%w: empty device path", ErrNoDevice)
 	}
 
 	pin, err := s.pin.Provide(ctx, op, info)
 	if err != nil {
-		return nil, hmacsecret.DeviceInfo{}, "", fmt.Errorf("secrets pin: %w", err)
+		return nil, "", fmt.Errorf("secrets pin: %w", err)
 	}
 
 	auth, err := s.open(info.Path)
 	if err != nil {
-		return nil, hmacsecret.DeviceInfo{}, "", fmt.Errorf("%w: %v", ErrNoDevice, err)
+		return nil, "", fmt.Errorf("%w: %v", ErrNoDevice, err)
 	}
-	return auth, info, pin, nil
-}
-
-// FirstDevice selects devices[0]. Useful when only one authenticator is present
-// or the list order is already preferred (e.g. Windows WebAuthn first).
-func FirstDevice() DeviceSelector {
-	return DeviceSelectorFunc(func(_ context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
-		if len(devices) == 0 {
-			return hmacsecret.DeviceInfo{}, ErrNoDevice
-		}
-		return devices[0], nil
-	})
-}
-
-// DeviceByPath selects the device whose path matches (case-insensitive on Windows hello path).
-func DeviceByPath(path string) DeviceSelector {
-	want := strings.TrimSpace(path)
-	return DeviceSelectorFunc(func(_ context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
-		for _, d := range devices {
-			if strings.EqualFold(d.Path, want) {
-				return d, nil
-			}
-		}
-		return hmacsecret.DeviceInfo{}, fmt.Errorf("%w: path %q not found", ErrNoDevice, want)
-	})
-}
-
-// DeviceByIndex selects devices[index] from the current listing.
-func DeviceByIndex(index int) DeviceSelector {
-	return DeviceSelectorFunc(func(_ context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
-		if index < 0 || index >= len(devices) {
-			return hmacsecret.DeviceInfo{}, fmt.Errorf("%w: index %d out of range (count=%d)", ErrNoDevice, index, len(devices))
-		}
-		return devices[index], nil
-	})
-}
-
-// NoPIN always returns an empty PIN (Windows WebAuthn / UV via OS UI).
-func NoPIN() PINProvider {
-	return PINProviderFunc(func(context.Context, Operation, hmacsecret.DeviceInfo) (string, error) {
-		return "", nil
-	})
-}
-
-// StaticPIN always returns pin.
-func StaticPIN(pin string) PINProvider {
-	return PINProviderFunc(func(context.Context, Operation, hmacsecret.DeviceInfo) (string, error) {
-		return pin, nil
-	})
-}
-
-// TerminalPIN asks for a console PIN when the device needs one; otherwise "".
-func TerminalPIN() PINProvider {
-	return PINProviderFunc(func(_ context.Context, _ Operation, device hmacsecret.DeviceInfo) (string, error) {
-		if !hmacsecret.NeedsTerminalPIN(device.Path) {
-			return "", nil
-		}
-		return hmacsecret.ReadTerminalPIN(nil)
-	})
+	return auth, pin, nil
 }

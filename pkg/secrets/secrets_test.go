@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/snowmerak/hmacsecret/lib/hmacsecret"
+	libsecrets "github.com/snowmerak/hmacsecret/lib/secrets"
 	"github.com/snowmerak/hmacsecret/lib/store"
 	"github.com/snowmerak/hmacsecret/pkg/secrets"
 	"github.com/snowmerak/hmacsecret/pkg/store/pebble"
@@ -66,7 +67,22 @@ func (m *mockAuth) Derive(opts hmacsecret.DeriveOptions) (*hmacsecret.Secret, er
 	return &sec, nil
 }
 
-func newTestSecrets(t *testing.T, auth *mockAuth, pin secrets.PINProvider) *secrets.Secrets {
+type staticPIN string
+
+func (p staticPIN) Provide(context.Context, libsecrets.Operation, hmacsecret.DeviceInfo) (string, error) {
+	return string(p), nil
+}
+
+func firstDevice() libsecrets.DeviceSelector {
+	return libsecrets.DeviceSelectorFunc(func(_ context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
+		if len(devices) == 0 {
+			return hmacsecret.DeviceInfo{}, secrets.ErrNoDevice
+		}
+		return devices[0], nil
+	})
+}
+
+func newTestSecrets(t *testing.T, auth *mockAuth, pin libsecrets.PINProvider) *secrets.Secrets {
 	t.Helper()
 	st, err := pebble.Open(filepath.Join(t.TempDir(), "db"))
 	if err != nil {
@@ -83,7 +99,7 @@ func newTestSecrets(t *testing.T, auth *mockAuth, pin secrets.PINProvider) *secr
 		Open: func(string) (secrets.Authenticator, error) {
 			return auth, nil
 		},
-		Select: secrets.FirstDevice(),
+		Select: firstDevice(),
 		PIN:    pin,
 		RPID:   "example.com",
 	})
@@ -99,7 +115,7 @@ func TestCreateDeriveDelete(t *testing.T) {
 		createCred:   &hmacsecret.Credential{ID: []byte{1, 2, 3, 4}, RPID: "example.com"},
 		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x22}, 32)},
 	}
-	svc := newTestSecrets(t, auth, secrets.StaticPIN("1234"))
+	svc := newTestSecrets(t, auth, staticPIN("1234"))
 
 	got, err := svc.Create(ctx, "db")
 	if err != nil {
@@ -115,7 +131,6 @@ func TestCreateDeriveDelete(t *testing.T) {
 		t.Fatalf("dup create = %v", err)
 	}
 
-	// Different provider pin on a new service would be app wiring; same svc uses same provider.
 	got, err = svc.Derive(ctx, "db")
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +157,7 @@ func TestCreateStoresBeforeDeriveFailure(t *testing.T) {
 		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x33}, 32)},
 		failFirstDer: true,
 	}
-	svc := newTestSecrets(t, auth, secrets.NoPIN())
+	svc := newTestSecrets(t, auth, staticPIN(""))
 
 	if _, err := svc.Create(ctx, "retry-me"); err == nil {
 		t.Fatal("expected create derive failure")
@@ -187,11 +202,11 @@ func TestDeviceSelectorReceivesListing(t *testing.T) {
 			}
 			return auth, nil
 		},
-		Select: secrets.DeviceSelectorFunc(func(_ context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
+		Select: libsecrets.DeviceSelectorFunc(func(_ context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
 			seen = append([]hmacsecret.DeviceInfo(nil), devices...)
 			return devices[1], nil
 		}),
-		PIN:  secrets.NoPIN(),
+		PIN:  staticPIN(""),
 		RPID: "example.com",
 	})
 	if err != nil {
@@ -212,7 +227,7 @@ func TestConcurrentCreateSameAlias(t *testing.T) {
 		deriveSecret: &hmacsecret.Secret{HMACSecret: bytes.Repeat([]byte{0x22}, 32)},
 		createDelay:  20 * time.Millisecond,
 	}
-	svc := newTestSecrets(t, auth, secrets.NoPIN())
+	svc := newTestSecrets(t, auth, staticPIN(""))
 
 	const n = 8
 	var (

@@ -1,8 +1,7 @@
-// Command secrets is a thin CLI over pkg/secrets with a pluggable store backend.
+// Command secrets is a thin CLI over pkg/secrets with pluggable store/PIN/device.
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -10,11 +9,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
+	"runtime"
 	"strings"
 
 	"github.com/snowmerak/hmacsecret/lib/hmacsecret"
+	libsecrets "github.com/snowmerak/hmacsecret/lib/secrets"
 	"github.com/snowmerak/hmacsecret/lib/store"
+	devicecli "github.com/snowmerak/hmacsecret/pkg/device/cli"
+	pincli "github.com/snowmerak/hmacsecret/pkg/pin/cli"
+	pinwindows "github.com/snowmerak/hmacsecret/pkg/pin/windows"
 	"github.com/snowmerak/hmacsecret/pkg/secrets"
 	"github.com/snowmerak/hmacsecret/pkg/store/pebble"
 	"github.com/snowmerak/hmacsecret/pkg/store/sqlite"
@@ -36,7 +39,6 @@ func run(args []string) error {
 		dbPath     string
 		rpID       string
 		userName   string
-		device     string // empty=interactive/first, index N, or path
 		noWebAuthn bool
 	)
 
@@ -44,7 +46,6 @@ func run(args []string) error {
 	fs.StringVar(&dbPath, "db", "", "store path (default: ./data/secrets.pebble or ./data/secrets.sqlite)")
 	fs.StringVar(&rpID, "rp-id", "hmac-secret.example", "relying party id for create")
 	fs.StringVar(&userName, "user", "hmac-secret", "credential user name for create")
-	fs.StringVar(&device, "device", "", "device selector: empty=prompt/first, integer index, or device path")
 	fs.BoolVar(&noWebAuthn, "no-windows-webauthn", false, "exclude Windows WebAuthn broker")
 
 	if err := fs.Parse(args); err != nil {
@@ -79,9 +80,9 @@ func run(args []string) error {
 	defer st.Close()
 
 	svc, err := secrets.New(secrets.Options{
-		Store: st,
-		Select: cliDeviceSelector(device),
-		PIN:    secrets.TerminalPIN(),
+		Store:  st,
+		Select: devicecli.New(),
+		PIN:    defaultPINProvider(),
 		ListOptions: hmacsecret.ListOptions{
 			ExcludeWindowsWebAuthn: noWebAuthn,
 		},
@@ -156,37 +157,9 @@ func openStore(backend, path string) (store.Store, error) {
 	}
 }
 
-func cliDeviceSelector(spec string) secrets.DeviceSelector {
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
-		return secrets.DeviceSelectorFunc(func(_ context.Context, devices []hmacsecret.DeviceInfo) (hmacsecret.DeviceInfo, error) {
-			if len(devices) == 0 {
-				return hmacsecret.DeviceInfo{}, secrets.ErrNoDevice
-			}
-			for _, d := range devices {
-				fmt.Fprintf(os.Stderr, "[%d] %s / %s (%s)\n", d.Index, d.Product, d.Manufacturer, d.Path)
-			}
-			if len(devices) == 1 {
-				return devices[0], nil
-			}
-			fmt.Fprintf(os.Stderr, "device index [0-%d]: ", len(devices)-1)
-			line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-			if err != nil {
-				return hmacsecret.DeviceInfo{}, err
-			}
-			line = strings.TrimSpace(line)
-			if line == "" {
-				return devices[0], nil
-			}
-			idx, err := strconv.Atoi(line)
-			if err != nil || idx < 0 || idx >= len(devices) {
-				return hmacsecret.DeviceInfo{}, fmt.Errorf("invalid device index %q", line)
-			}
-			return devices[idx], nil
-		})
+func defaultPINProvider() libsecrets.PINProvider {
+	if runtime.GOOS == "windows" {
+		return pinwindows.New()
 	}
-	if idx, err := strconv.Atoi(spec); err == nil {
-		return secrets.DeviceByIndex(idx)
-	}
-	return secrets.DeviceByPath(spec)
+	return pincli.New()
 }
