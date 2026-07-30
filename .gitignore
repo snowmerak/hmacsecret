@@ -4,4 +4,6 @@
 *.dylib
 /hmac-secret
 /hmac-secret-linux
+/secrets
 /.native/
+/data/
