@@ -185,6 +185,7 @@ func (d *Device) Derive(opts DeriveOptions) (*Secret, error) {
 // CreateAndDerive creates a credential then immediately derives a secret.
 // If salt is nil/empty, a random salt is generated.
 func (d *Device) CreateAndDerive(create CreateOptions, salt []byte, pin string) (*Secret, error) {
+	create.PIN = pin
 	cred, err := d.CreateCredential(create)
 	if err != nil {
 		return nil, err
