@@ -83,6 +83,61 @@ go build -trimpath -o hmac-secret-arm64.exe ./cmd/hmac-secret
 The low-level API is in `lib/hmacsecret`. The higher-level alias and storage
 service is in `pkg/secrets`.
 
+Derived HMAC secrets are copied directly from native FIDO/WebAuthn-owned memory
+into a `memguard.LockedBuffer`, sealed, and returned as `*memguard.Enclave`.
+Open an enclave only when the plaintext is needed, and destroy the returned
+locked buffer immediately after use:
+
+```go
+secret, err := service.Derive(ctx, "my-secret")
+if err != nil {
+	return err
+}
+plaintext, err := secret.Open()
+if err != nil {
+	return err
+}
+defer plaintext.Destroy()
+// Use plaintext.Bytes() without copying it into an ordinary Go allocation.
+```
+
+### Encrypted store
+
+`pkg/store/encrypted` implements `lib/store.EncryptedStore` over either the
+Pebble or SQLite backend. Its public header stores the KEK credential ID, salt,
+and RP ID needed to re-derive the KEK. A random 32-byte store DEK is wrapped by
+that KEK, and complete per-alias credential records are authenticated and
+encrypted by the store DEK with XChaCha20-Poly1305.
+
+Aliases, format metadata, and the KEK reference remain public. Credential IDs,
+salts, and RP IDs for stored aliases are encrypted. `Has` and `List` therefore
+work while the store is locked; `Put`, `Get`, and `Delete` require an unlocked
+store.
+
+```go
+backend, err := pebble.Open("data/secrets.pebble")
+if err != nil {
+	return err
+}
+encryptedStore, err := encrypted.New(backend)
+if err != nil {
+	return err
+}
+defer encryptedStore.Close()
+
+// kek is a sealed 32-byte value derived from the public KEKReference.
+err = encryptedStore.Initialize(ctx, store.KEKReference{
+	CredentialID: kekCredentialID,
+	Salt:         kekSalt,
+	RPID:         kekRPID,
+}, kek)
+```
+
+For an existing store, read `encryptedStore.Header()`, derive the KEK from its
+public `KEK` reference, and pass the resulting enclave to
+`encryptedStore.Unlock()`. `RotateKEK` rewraps only the store DEK; record
+ciphertext is not rewritten.
+
 Normal macOS and Linux CGO builds use the bundled patched Go bindings and link
 against the system libfido2. The bundled native libfido2 sources are retained
 only for the explicit Windows compatibility/reference backend; that non-default

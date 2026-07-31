@@ -16,6 +16,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/awnumar/memguard"
 	"github.com/pkg/errors"
 )
 
@@ -157,7 +158,7 @@ type Assertion struct {
 	// TODO: Include "raw" authdata if that is added to libfido2.
 	AuthDataCBOR []byte
 	Sig          []byte
-	HMACSecret   []byte
+	HMACSecret   *memguard.Enclave
 	CredentialID []byte
 	User         User
 }
@@ -724,10 +725,6 @@ func (d *Device) Assertion(
 	cAuthDataPtr := C.fido_assert_authdata_ptr(cAssert, cIdx)
 	authDataCBOR := C.GoBytes(unsafe.Pointer(cAuthDataPtr), C.int(cAuthDataLen))
 
-	cHMACLen := C.fido_assert_hmac_secret_len(cAssert, cIdx)
-	cHMACPtr := C.fido_assert_hmac_secret_ptr(cAssert, cIdx)
-	hmacSecret := C.GoBytes(unsafe.Pointer(cHMACPtr), C.int(cHMACLen))
-
 	cSigLen := C.fido_assert_sig_len(cAssert, cIdx)
 	cSigPtr := C.fido_assert_sig_ptr(cAssert, cIdx)
 	sig := C.GoBytes(unsafe.Pointer(cSigPtr), C.int(cSigLen))
@@ -739,6 +736,17 @@ func (d *Device) Assertion(
 	cUserIDLen := C.fido_assert_user_id_len(cAssert, cIdx)
 	cUserIDPtr := C.fido_assert_user_id_ptr(cAssert, cIdx)
 	userID := C.GoBytes(unsafe.Pointer(cUserIDPtr), C.int(cUserIDLen))
+
+	cHMACLen := C.fido_assert_hmac_secret_len(cAssert, cIdx)
+	cHMACPtr := C.fido_assert_hmac_secret_ptr(cAssert, cIdx)
+	var hmacSecret *memguard.Enclave
+	if cHMACLen > 0 && cHMACPtr != nil {
+		// Copy directly from libfido2-owned memory into locked memory so the
+		// plaintext never enters an ordinary Go heap allocation.
+		plaintext := memguard.NewBuffer(int(cHMACLen))
+		plaintext.Copy(unsafe.Slice((*byte)(unsafe.Pointer(cHMACPtr)), int(cHMACLen)))
+		hmacSecret = plaintext.Seal()
+	}
 
 	// cUserName := C.fido_assert_user_name(cAssert, cIdx)
 	// cUserDisplayName := C.fido_assert_user_display_name(cAssert, cIdx)

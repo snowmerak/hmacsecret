@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/awnumar/memguard"
 	"golang.org/x/sys/windows"
 )
 
@@ -49,4 +50,22 @@ func copyResultBytes(ptr unsafe.Pointer, size uint32, field string) ([]byte, err
 	}
 	src := unsafe.Slice((*byte)(ptr), int(size))
 	return append([]byte(nil), src...), nil
+}
+
+func sealResultBytes(ptr unsafe.Pointer, size uint32, field string) (*memguard.Enclave, error) {
+	if size == 0 {
+		return nil, nil
+	}
+	if ptr == nil {
+		return nil, fmt.Errorf("%s: non-zero size with nil pointer", field)
+	}
+	if size > maxResultBytes {
+		return nil, fmt.Errorf("%s: result is too large: %d bytes", field, size)
+	}
+
+	// Copy directly from WebAuthn-owned memory into guarded, locked memory.
+	// Seal destroys the plaintext LockedBuffer after encrypting it.
+	plaintext := memguard.NewBuffer(int(size))
+	plaintext.Copy(unsafe.Slice((*byte)(ptr), int(size)))
+	return plaintext.Seal(), nil
 }

@@ -9,13 +9,21 @@ import (
 	"os"
 	"strings"
 
+	"github.com/awnumar/memguard"
+
 	"github.com/snowmerak/hmacsecret/lib/hmacsecret"
 )
 
 func main() {
+	memguard.CatchInterrupt()
+	exitCode := 0
 	if err := run(os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		exitCode = 1
+	}
+	memguard.Purge()
+	if exitCode != 0 {
+		os.Exit(exitCode)
 	}
 }
 
@@ -126,9 +134,33 @@ func run(stdout, stderr io.Writer) error {
 
 	fmt.Fprintf(stdout, "credential_id=%s\n", hex.EncodeToString(secret.CredentialID))
 	fmt.Fprintf(stdout, "salt=%s\n", hex.EncodeToString(secret.Salt))
-	fmt.Fprintf(stdout, "hmac_secret=%s\n", hex.EncodeToString(secret.HMACSecret))
+	if err := writeEnclaveHex(stdout, "hmac_secret=", secret.HMACSecret); err != nil {
+		return err
+	}
 	if generated {
 		fmt.Fprintln(stderr, "generated random salt; store credential_id+salt to reproduce")
+	}
+	return nil
+}
+
+func writeEnclaveHex(w io.Writer, prefix string, enclave *memguard.Enclave) error {
+	if enclave == nil {
+		return hmacsecret.ErrEmptyHMACSecret
+	}
+	secret, err := enclave.Open()
+	if err != nil {
+		return fmt.Errorf("open hmac-secret enclave: %w", err)
+	}
+	defer secret.Destroy()
+
+	if _, err := io.WriteString(w, prefix); err != nil {
+		return fmt.Errorf("write hmac-secret prefix: %w", err)
+	}
+	if _, err := hex.NewEncoder(w).Write(secret.Bytes()); err != nil {
+		return fmt.Errorf("write hmac-secret: %w", err)
+	}
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		return fmt.Errorf("write hmac-secret newline: %w", err)
 	}
 	return nil
 }

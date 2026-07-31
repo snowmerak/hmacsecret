@@ -10,6 +10,8 @@ Local changes:
 
 - Add `ClientDataJSON` to credential and assertion options.
 - Pass raw WebAuthn client data to libfido2 when supplied.
+- Seal returned HMAC secret bytes in a memguard Enclave immediately after
+  crossing the cgo boundary.
 - Link normal macOS CGO builds against Homebrew libfido2 through pkg-config.
 - Compile the bundled patched libfido2 1.17.0 Windows sources directly with
   cgo instead of linking a separate libfido2 library.

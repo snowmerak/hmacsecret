@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"time"
 	"unsafe"
+
+	"github.com/awnumar/memguard"
 )
 
 type GetAssertionRequest struct {
@@ -21,7 +23,7 @@ type GetAssertionRequest struct {
 type GetAssertionResult struct {
 	CredentialID      []byte
 	AuthenticatorData []byte
-	HMACSecret        []byte
+	HMACSecret        *memguard.Enclave
 }
 
 func (a *API) GetAssertion(request GetAssertionRequest) (*GetAssertionResult, error) {
@@ -133,14 +135,6 @@ func (a *API) GetAssertion(request GetAssertionRequest) (*GetAssertionResult, er
 	if assertion.Version < 3 || assertion.HMACSecret == nil {
 		return nil, ErrPRFDisabled
 	}
-	secretSalt := (*HMACSecretSalt)(assertion.HMACSecret)
-	secret, err := copyResultBytes(secretSalt.First, secretSalt.FirstLength, "HMAC secret")
-	if err != nil {
-		return nil, err
-	}
-	if len(secret) != HMACSecretLength {
-		return nil, fmt.Errorf("WebAuthNAuthenticatorGetAssertion: HMAC secret is %d bytes, want %d", len(secret), HMACSecretLength)
-	}
 
 	credentialID, err := copyResultBytes(
 		assertion.Credential.ID,
@@ -160,6 +154,19 @@ func (a *API) GetAssertion(request GetAssertionRequest) (*GetAssertionResult, er
 		assertion.AuthenticatorDataLength,
 		"authenticator data",
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	secretSalt := (*HMACSecretSalt)(assertion.HMACSecret)
+	if secretSalt.FirstLength != HMACSecretLength {
+		return nil, fmt.Errorf(
+			"WebAuthNAuthenticatorGetAssertion: HMAC secret is %d bytes, want %d",
+			secretSalt.FirstLength,
+			HMACSecretLength,
+		)
+	}
+	secret, err := sealResultBytes(secretSalt.First, secretSalt.FirstLength, "HMAC secret")
 	if err != nil {
 		return nil, err
 	}

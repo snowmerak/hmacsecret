@@ -2,7 +2,11 @@
 // hmac-secret extension or the Windows WebAuthn PRF API.
 package hmacsecret
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/awnumar/memguard"
+)
 
 // SaltSize is the hmac-secret salt length required by CTAP2.
 const SaltSize = 32
@@ -80,9 +84,11 @@ type Credential struct {
 	PubKey []byte
 }
 
-// Secret is a derived hmac-secret value plus the inputs needed to reproduce it.
+// Secret is a sealed hmac-secret value plus the inputs needed to reproduce it.
 type Secret struct {
 	CredentialID []byte
 	Salt         []byte
-	HMACSecret   []byte
+	// HMACSecret remains encrypted until the caller opens the Enclave.
+	// Destroy the returned LockedBuffer immediately after use.
+	HMACSecret *memguard.Enclave
 }
